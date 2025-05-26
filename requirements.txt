@@ -1,12 +1,13 @@
 numpy
 scipy
 tqdm
-docopt
-nltk
+# docopt
+# nltk
 torchvision
 torch
-sentencepiece
-lxml==5.0.0
-sacrebleu
-tensorboard
+# sacrebleu
+# tensorboard
 huggingface
+hmmlearn
+transformers
+datasets

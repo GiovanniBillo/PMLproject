@@ -1,4 +1,4 @@
-name: cs224n-cpu
+name:pmlenv 
 channels:
   - defaults
   - nvidia
