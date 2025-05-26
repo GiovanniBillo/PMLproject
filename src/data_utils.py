@@ -19,7 +19,7 @@ def load_imdb_data(split ='train', num_samples=None,shuffle=True):
 
     return dataset
 
-def process_data_for_inference_logging(dataset, tokenizer):
+def preprocess_data_for_inference_logging(dataset, tokenizer):
     processed_data = []
     
     for example in tqdm(dataset):
@@ -38,7 +38,7 @@ if __name__ == '__main__':
     tokenizer = get_tokenizer()
     train_dataset = load_imdb_data(split='train', num_samples=2)
     
-    processed_train_data = process_data_for_inference_logging(train_dataset, tokenizer)
+    processed_train_data = preprocess_data_for_inference_logging(train_dataset, tokenizer)
     
     for item in processed_train_data:
         print(f"\nText: {item['text'][:100]}...")
