@@ -3,7 +3,7 @@ from transformers import AutoTokenizer
 from tqdm.auto import tqdm
 import numpy as np
 
-from .config import DATASET_NAME, MAX_TOKENS, MODEL_NAME
+from config import DATASET_NAME, MAX_TOKENS, MODEL_NAME
 
 def get_tokenizer():
     return AutoTokenizer.from_pretrained(MODEL_NAME)

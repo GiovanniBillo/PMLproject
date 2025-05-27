@@ -3,7 +3,7 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from tqdm.auto import tqdm
 import numpy as np
 
-from .config import MODEL_NAME, DEVICE, MAX_TOKENS
+from config import MODEL_NAME, DEVICE, MAX_TOKENS
 
 
 class BlackBoxSentimentClassifier:
