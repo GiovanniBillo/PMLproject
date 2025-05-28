@@ -4,7 +4,7 @@ import joblib
 from tqdm.auto import tqdm
 
 from .config import NUM_HMM_STATES, HMM_N_ITER, HMM_TOL, HMM_COV_TYPE, \
-                       TARGET_SENTIMENT, HMM_MODEL_PATH
+                       TARGET_SENTIMENT, HMM_MODEL_PATH, PROB_THRESHOLDS
 
 class HMMSurrogate:
     def __init__(self, n_states=NUM_HMM_STATES, n_iter=HMM_N_ITER, tol=HMM_TOL,
@@ -98,12 +98,18 @@ class HMMSurrogate:
             observation_sequences: List of original observation sequences (probs).
             decoded_state_sequences: List of corresponding decoded HMM state sequences.
             target_class_idx: Index of the class probability to focus on (e.g., P(positive)).
+                               Defaults to TARGET_SENTIMENT from config.
         Returns:
             A dictionary where keys are state indices and values are dicts
-            containing 'avg_prob_target_class' and 'num_occurrences'.
+            containing 'avg_prob_target_class', 'num_occurrences'.
+            The dictionary also includes a 'state_names' key mapping HMM state indices
+            to their interpreted names.
         """
         if not self.is_trained:
             raise ValueError("HMM model is not trained yet.")
+
+        # Assumes PROB_THRESHOLDS is imported, e.g., from .config import PROB_THRESHOLDS
+        # And TARGET_SENTIMENT is also available (as it's a default arg).
 
         state_analysis = {i: {'occurrences': 0, 'sum_target_prob': 0.0} for i in range(self.n_states)}
 
@@ -125,37 +131,36 @@ class HMMSurrogate:
             }
             print(f"State {state}: Occurrences = {data['occurrences']}, Avg. P(Class {target_class_idx}) = {avg_prob:.3f}")
         
-        # Attempt to order states by avg_prob_target_class for intuitive naming
-        # This is a heuristic.
-        sorted_states = sorted(results.items(), key=lambda item: item[1]['avg_prob_target_class'])
-        
         state_names = {}
-        if self.n_states == 3: 
-            if len(sorted_states) == self.n_states:
-                state_names[sorted_states[0][0]] = "Leaning Negative/Low Confidence"
-                state_names[sorted_states[1][0]] = "Neutral/Uncertain"
-                state_names[sorted_states[2][0]] = "Leaning Positive/High Confidence"
-            else:
-                 for i, (state_idx, _) in enumerate(sorted_states): # Fallback
-                    state_names[state_idx] = f"State {state_idx} (Ranked {i} by P(Class {target_class_idx}))"
-        elif self.n_states == 4: # Specific naming for 4 states, merging two lowest for interpretation
-            if len(sorted_states) == self.n_states:
-                state_names[sorted_states[0][0]] = "Leaning Negative/Low Confidence" # Lowest P(target_class)
-                state_names[sorted_states[1][0]] = "Leaning Negative/Low Confidence" # Second lowest P(target_class)
-                state_names[sorted_states[2][0]] = "Neutral/Uncertain"
-                state_names[sorted_states[3][0]] = "Leaning Positive/High Confidence" # Highest P(target_class)
-            else:
-                 for i, (state_idx, _) in enumerate(sorted_states): # Fallback
-                    state_names[state_idx] = f"State {state_idx} (Ranked {i} by P(Class {target_class_idx}))"
-        elif self.n_states > 0 : # Generic naming for other cases
-            for i, (state_idx, _) in enumerate(sorted_states):
-                 state_names[state_idx] = f"State {state_idx} (Ranked {i} by P(Class {target_class_idx}))"
+        # Use PROB_THRESHOLDS for categorization.
+        # Example: PROB_THRESHOLDS = {"NEG_OBS": 0.4, "NEU_OBS": 0.6}
+        for state_idx, data_dict in results.items():
+            avg_prob = data_dict['avg_prob_target_class']
+            
+            if avg_prob <= PROB_THRESHOLDS["NEG_OBS"]:
+                state_names[state_idx] = "Leaning Negative/Low Confidence"
+            elif avg_prob <= PROB_THRESHOLDS["NEU_OBS"]: # i.e., NEG_OBS < avg_prob <= NEU_OBS
+                state_names[state_idx] = "Neutral/Uncertain"
+            else: # avg_prob > PROB_THRESHOLDS["NEU_OBS"]
+                state_names[state_idx] = "Leaning Positive/High Confidence"
         
         print("\nSuggested State Interpretations (based on P(Class {target_class_idx})):")
-        for state_idx, name in state_names.items():
-            print(f"  HMM State {state_idx}: ~{name} (Avg. P(Class {target_class_idx}) = {results[state_idx]['avg_prob_target_class']:.3f})")
         
-        results['state_names'] = state_names
+        print_info = []
+        for state_idx, data_dict in results.items():
+            # Ensure we are processing actual HMM state data (integer keys)
+            if isinstance(state_idx, int):
+                avg_prob_val = data_dict['avg_prob_target_class']
+                name = state_names[state_idx] # Get the name from the map created above
+                print_info.append((state_idx, avg_prob_val, name))
+            
+        # Sort by average probability of the target class for clearer presentation
+        print_info.sort(key=lambda x: x[1])
+
+        for state_idx_sorted, avg_prob_sorted, name_sorted in print_info:
+            print(f"  HMM State {state_idx_sorted}: ~{name_sorted} (Avg. P(Class {target_class_idx}) = {avg_prob_sorted:.3f})")
+        
+        results['state_names'] = state_names # Add the interpretation map to the results
         return results
 
 if __name__ == '__main__':
