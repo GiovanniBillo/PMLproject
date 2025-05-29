@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 
 from src.config import TARGET_SENTIMENT
-from src.clustering_utils import log_color_shifts, save_color_log
 
 def plot_state_timeline(tokens, prob_trajectory, state_sequence, state_names=None, target_class_idx=TARGET_SENTIMENT, ax=None):
     """
@@ -141,29 +140,92 @@ def plot_state_timeline(tokens, prob_trajectory, state_sequence, state_names=Non
     
     # Adjust layout to make space for the sentence at the bottom
     fig.tight_layout(rect=[0, 0.15, 1, 0.95]) # Increased bottom margin for sentence
-    
+
+    # --- MODIFIED SECTION: Add colored sentence string ---
     if T > 0:
-        def rgb_to_ansi(r, g, b):
-            """Return ANSI escape code for truecolor RGB foreground."""
-            return f"\033[38;2;{r};{g};{b}m"
+        # Ensure renderer is available. This might require the figure to be drawn once.
+        # For most backends, it's available after plt.subplots().
+        try:
+            renderer = fig.canvas.get_renderer()
+        except Exception:
+            # Fallback if renderer is not immediately available (e.g. some backends or contexts)
+            # This might lead to less accurate text placement if the fallback width calculations are used.
+            print("Warning: Could not get renderer immediately. Text layout for sentence might be suboptimal.")
+            renderer = None 
 
-        print("\nSentence tokens with HMM colors:")
+        # parameters for the colored sentence string
+        initial_sentence_y_fig = 0.10 # y position in figure coordinates (fraction from bottom)
+        current_sentence_y_fig = initial_sentence_y_fig
+        margin_x_fig = 0.03  # starting x position (left margin)
+        current_x_fig = margin_x_fig
+        sentence_fontsize = 10 # increased font size for readability
+        line_spacing_factor = 1.5 # multiplier for font size to get line height
+        
+        line_height_points = sentence_fontsize * line_spacing_factor
+        line_height_fig = line_height_points / (fig.get_figheight() * fig.dpi)
+
+        # Calculate width of a standard space character in figure coordinates
+        space_width_fig = (sentence_fontsize * 0.3) / (fig.get_figwidth() * fig.dpi) # Fallback
+        if renderer:
+            try:
+                space_text_obj = fig.text(0, 0, " ", fontsize=sentence_fontsize, visible=False, transform=fig.transFigure)
+                space_bbox = space_text_obj.get_window_extent(renderer=renderer)
+                space_width_fig = space_bbox.width / (fig.get_figwidth() * fig.dpi)
+                space_text_obj.remove()
+            except Exception as e:
+                print(f"Warning: Failed to calculate space width accurately: {e}")
+
+
+        max_x_fig = 0.97 # Don't let text go beyond 97% of figure width (right margin)
+        min_y_fig_for_ellipsis = 0.01 # If text goes below this y-coordinate, show ellipsis
+
         for i in range(T):
-            token_str = tokens[i].strip()
-            if not token_str:
-                continue  # Skip empty or whitespace-only tokens
-
+            token_str = tokens[i]
             state = state_sequence[i]
-            rgba = cmap(state)  # Get RGBA color
-            # if rgba != None and rgba != prev_rgba:
-            #     print(f"color changed with token {token_str}")
-            #     color_transitions_log[i] = token_str  
-            r, g, b = [int(255 * c) for c in rgba[:3]]  # Convert to RGB 0–255
-            ansi_color = rgb_to_ansi(r, g, b)
-            print(f"{ansi_color}{token_str}\033[0m", end=' ')
-        print("\n")  # Final newline after printing the full sentence
-    # 🔁 Log the transition info
-    log_color_shifts(tokens, state_sequence, cmap)
+            token_color = cmap(state)
+
+            # Calculate actual token width in figure coordinates using a temporary text object
+            token_width_fig = (len(token_str) * sentence_fontsize * 0.55) / (fig.get_figwidth() * fig.dpi) # Fallback
+            if renderer:
+                try:
+
+                    fig.canvas.draw()
+                    renderer = fig.canvas.get_renderer()
+
+                    temp_text_obj = fig.text(0, 0, token_str, fontsize=sentence_fontsize, visible=False, transform=fig.transFigure)
+                    token_bbox = temp_text_obj.get_window_extent(renderer=renderer)
+                    token_width_fig = token_bbox.width / (fig.get_figwidth() * fig.dpi)
+                    temp_text_obj.remove()
+                except Exception as e:
+                     print(f"Warning: Failed to calculate token width for '{token_str}': {e}")
+
+
+            # If adding this token would overflow current line (and it's not the first token on the line)
+            if current_x_fig + token_width_fig > max_x_fig and current_x_fig > margin_x_fig + 1e-6: # Epsilon for float comparison
+                current_x_fig = margin_x_fig # Reset to left margin
+                current_sentence_y_fig -= line_height_fig # Move to a new line below
+
+            # Safety break if text goes too far down (multiple lines make y too small)
+            # Check if not on the first line to avoid breaking if initial_sentence_y_fig is already too low
+            if current_sentence_y_fig < min_y_fig_for_ellipsis and \
+               abs(current_sentence_y_fig - initial_sentence_y_fig) > 1e-6 : 
+                fig.text(current_x_fig, current_sentence_y_fig, "...", 
+                         transform=fig.transFigure, fontsize=sentence_fontsize, color='black',
+                         ha='left', va='bottom')
+                break 
+            
+            fig.text(current_x_fig, current_sentence_y_fig, token_str,
+                     color=token_color,
+                     fontsize=sentence_fontsize,
+                     ha='left',
+                     va='bottom', # Anchor text from its bottom-left
+                     transform=fig.transFigure)
+
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+
+            current_x_fig += token_width_fig + space_width_fig
+    # --- END MODIFIED SECTION ---
 
     if ax is None:
         plt.show()

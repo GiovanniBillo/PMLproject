@@ -11,3 +11,6 @@ huggingface
 hmmlearn
 transformers
 datasets
+# for clustering visualization with hovering
+plotly
+nbformat
