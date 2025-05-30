@@ -16,8 +16,10 @@ class HMMSurrogate:
             n_iter=n_iter,
             tol=tol,
             random_state=random_state,
-            verbose=True # To see Baum-Welch progress
+            verbose=True ,
+            min_covar=1e-3
         )
+        
         self.is_trained = False
 
     def train(self, observation_sequences):
