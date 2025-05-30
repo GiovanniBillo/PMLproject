@@ -163,6 +163,71 @@ class HMMSurrogate:
         results['state_names'] = state_names # Add the interpretation map to the results
         return results
 
+    def check_convergence(self, show_plot=True, save_diagnostics=True):
+        """
+        Checks the convergence status of the HMM training by inspecting the monitor log.
+        Args:
+            show_plot: If True, plots the log-likelihood per iteration.
+            save_diagnostics: If True, saves diagnostics data and plot to 'convergence_diagnostics' directory.
+        Returns:
+            A dictionary containing:
+                - 'converged': True if the model converged, False otherwise
+                - 'log_likelihoods': List of log-likelihood values per iteration
+                - 'n_iter': Number of iterations performed
+                - 'tol': Convergence tolerance
+        """
+        if not self.is_trained:
+            raise ValueError("HMM model is not trained yet.")
+        
+        try:
+            monitor = getattr(self.model, 'monitor_', None)
+            if monitor is None:
+                print("ConvergenceMonitor is not available. Model may not have been fitted with hmmlearn or is missing internal attributes.")
+                return None
+            
+            log_likelihoods = getattr(monitor, 'history', None)
+            if log_likelihoods is None:
+                print("Monitor does not have a 'history' attribute. Cannot retrieve log-likelihood progression.")
+                return None
+            
+            n_iter = len(log_likelihoods)
+            tol = getattr(monitor, 'tol', 'N/A')
+            converged = getattr(monitor, 'converged', False)
+
+            print("\n--- HMM Convergence Check ---")
+            print(f"Converged: {converged}")
+            print(f"Number of iterations: {n_iter}")
+            print(f"Tolerance: {tol}")
+            print(f"Final log-likelihood: {log_likelihoods[-1]:.4f}" if log_likelihoods else "No log-likelihood data available.")
+
+            # if show_plot and log_likelihoods:
+            #     plot_log_likelihoods(log_likelihoods, n_iter=n_iter, show=True)
+
+            # if save_diagnostics:
+            #     diagnostics_dir = "convergence_diagnostics"
+            #     save_convergence_data({
+            #         'converged': converged,
+            #         'log_likelihoods': log_likelihoods,
+            #         'n_iter': n_iter,
+            #         'tol': tol
+            #     }, diagnostics_dir=diagnostics_dir)
+
+            #     if log_likelihoods:
+            #         plot_path = os.path.join(diagnostics_dir, "convergence_plot.png")
+            #         plot_log_likelihoods(log_likelihoods, n_iter=n_iter, show=False, save_path=plot_path)           
+
+
+            return {
+                'converged': converged,
+                'log_likelihoods': log_likelihoods,
+                'n_iter': n_iter,
+                'tol': tol
+            }
+
+        except AttributeError as e:
+            print(f"AttributeError encountered while checking convergence: {e}")
+            return None
+
 if __name__ == '__main__':
     # Example: Simulate some observation sequences
     # Each sequence: (num_steps, num_features=2 for binary classification probs)

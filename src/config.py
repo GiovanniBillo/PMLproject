@@ -3,10 +3,11 @@ import torch
 MODEL_NAME = "lvwerra/distilbert-imdb"
 DATASET_NAME = "imdb"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MAX_TOKENS = 100 
+MAX_TOKENS = 20 
 
 LOG_FILE_PATH = "data/imbd_inference_logs25k.npz"
 COLOR_LOG_FILE_PATH = "data/clustering/color_transitions_log.pkl"
+PLOT_SAVE_PATH="notebooks/plots"
 
 ## HMM CONFIG
 
