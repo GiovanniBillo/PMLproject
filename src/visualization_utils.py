@@ -4,8 +4,9 @@ import seaborn as sns
 import numpy as np
 import pandas as pd
 
-from src.config import TARGET_SENTIMENT
-from src.clustering_utils import log_color_shifts, save_color_log
+from .config import TARGET_SENTIMENT
+
+from .clustering_utils import log_color_shifts, save_color_log
 
 def plot_state_timeline(tokens, prob_trajectory, state_sequence, state_names=None, target_class_idx=TARGET_SENTIMENT, ax=None):
     """
