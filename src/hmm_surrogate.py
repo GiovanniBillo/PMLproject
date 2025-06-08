@@ -3,7 +3,7 @@ from hmmlearn import hmm
 import joblib
 from tqdm.auto import tqdm
 
-from .config import NUM_HMM_STATES, HMM_N_ITER, HMM_TOL, HMM_COV_TYPE, \
+from src.config import NUM_HMM_STATES, HMM_N_ITER, HMM_TOL, HMM_COV_TYPE, \
                        TARGET_SENTIMENT, HMM_MODEL_PATH, PROB_THRESHOLDS
 
 class HMMSurrogate:
@@ -89,8 +89,8 @@ class HMMSurrogate:
     def load_model(self, path=HMM_MODEL_PATH):
         self.model = joblib.load(path)
         self.is_trained = True # Assume loaded model is trained
-        self.n_states = self.model.n_components
-        print(f"HMM model loaded from {path}")
+        self.n_states = self.model.n_components # !!! even if src.config specifies 3 states the models changes them to what is actually loaded from data. 
+        print(f"HMM model loaded from {path} has {self.model.n_components} states")
         self.print_hmm_parameters() # Print params of loaded model
 
     def analyze_states(self, observation_sequences, decoded_state_sequences, target_class_idx=TARGET_SENTIMENT):

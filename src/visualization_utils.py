@@ -3,6 +3,9 @@ import matplotlib.colors as mcolors
 import seaborn as sns
 import numpy as np
 import pandas as pd
+# to plot gaussian emissions
+from scipy.stats import norm, multivariate_normal
+import os
 
 from src.config import TARGET_SENTIMENT
 from src.clustering_utils import log_color_shifts, save_color_log
@@ -223,6 +226,76 @@ def plot_avg_probabilities_per_state(state_analysis_results, target_class_idx=TA
     plt.tight_layout()
     plt.show()
 
+def plot_gaussian_emissions(means, covariances, output_dir="plots"):
+    """
+    Plots a grid of both 1D (positive sentiment) and 2D density plots for each state.
+    Saves the entire grid as a single PNG file and also shows it interactively.
+
+    Args:
+        means (np.ndarray): Array of shape (n_states, 2) with the means.
+        covariances (np.ndarray): Array of shape (n_states, 2, 2) with the covariances.
+        output_dir (str): Directory where plots will be saved.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    n_states = len(means)
+
+    fig, axs = plt.subplots(n_states, 2, figsize=(12, 4 * n_states))
+
+    if n_states == 1:
+        axs = np.expand_dims(axs, axis=0)  # ensure it's 2D shape
+
+    for i, (mean, cov) in enumerate(zip(means, covariances)):
+        ####### 1D Plot #######
+        mu = mean[0]
+        sigma2 = cov[0, 0]
+        sigma = np.sqrt(sigma2)
+
+        x_min = max(0.0, mu - 4 * sigma)
+        x_max = min(1.0, mu + 4 * sigma)
+        x = np.linspace(x_min, x_max, 500)
+        y = norm.pdf(x, loc=mu, scale=sigma)
+
+        ax1d = axs[i, 0]
+        ax1d.plot(x, y, color='blue', lw=2)
+        ax1d.axvline(mu, color='red', linestyle='--', label='Mean')
+        ax1d.set_xlabel('Feature 1 (Positive Sentiment)')
+        ax1d.set_ylabel('Density')
+        ax1d.set_title(f'1D Gaussian - State {i}')
+        ax1d.legend()
+        ax1d.grid(True)
+
+        ####### 2D Plot #######
+        stds = np.sqrt(np.diag(cov))
+        x_min_2d = max(0.0, mean[0] - 4 * stds[0])
+        x_max_2d = min(1.0, mean[0] + 4 * stds[0])
+        y_min_2d = max(0.0, mean[1] - 4 * stds[1])
+        y_max_2d = min(1.0, mean[1] + 4 * stds[1])
+
+        x2 = np.linspace(x_min_2d, x_max_2d, 200)
+        y2 = np.linspace(y_min_2d, y_max_2d, 200)
+        X, Y = np.meshgrid(x2, y2)
+        pos = np.dstack((X, Y))
+
+        rv = multivariate_normal(mean, cov)
+        Z = rv.pdf(pos)
+
+        ax2d = axs[i, 1]
+        contour = ax2d.contourf(X, Y, Z, levels=25, cmap='viridis')
+        fig.colorbar(contour, ax=ax2d, label='Density')
+        ax2d.scatter(mean[0], mean[1], c='red', marker='x', label='Mean')
+        ax2d.set_xlabel('Feature 1')
+        ax2d.set_ylabel('Feature 2')
+        ax2d.set_title(f'2D Gaussian Density - State {i}')
+        ax2d.legend()
+        ax2d.grid(True)
+
+    plt.tight_layout()
+    plt.show()
+    grid_filename = os.path.join(output_dir, 'gaussian_emissions_grid.png')
+    fig.savefig(grid_filename)
+    plt.close(fig)
+
+    print(f'Saved grid plot to \"{grid_filename}\".')
 if __name__ == '__main__':
     # --- Example Usage for plot_state_timeline ---
     # Using a longer sentence to test wrapping
