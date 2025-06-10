@@ -236,6 +236,11 @@ def plot_gaussian_emissions(means, covariances, output_dir="plots"):
         covariances (np.ndarray): Array of shape (n_states, 2, 2) with the covariances.
         output_dir (str): Directory where plots will be saved.
     """
+    import os
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from scipy.stats import norm, multivariate_normal
+
     os.makedirs(output_dir, exist_ok=True)
     n_states = len(means)
 
@@ -263,6 +268,11 @@ def plot_gaussian_emissions(means, covariances, output_dir="plots"):
         ax1d.set_title(f'1D Gaussian - State {i}')
         ax1d.legend()
         ax1d.grid(True)
+
+    # Now fix the ordering issue in 2D plots
+    for i, idx in enumerate(sorted(range(n_states))):  # Ensures correct order
+        mean = means[idx]
+        cov = covariances[idx]
 
         ####### 2D Plot #######
         stds = np.sqrt(np.diag(cov))
@@ -296,6 +306,8 @@ def plot_gaussian_emissions(means, covariances, output_dir="plots"):
     plt.close(fig)
 
     print(f'Saved grid plot to \"{grid_filename}\".')
+
+
 if __name__ == '__main__':
     # --- Example Usage for plot_state_timeline ---
     # Using a longer sentence to test wrapping
