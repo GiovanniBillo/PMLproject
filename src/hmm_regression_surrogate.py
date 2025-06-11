@@ -39,7 +39,6 @@ class HMMRegressionSurrogate:
         self.n_pca_components = n_pca_components
         self.pca_transformer = PCA(n_components=self.n_pca_components, random_state=random_state) if use_pca_features else None
 
-        # Enhanced HMM robustness parameters
         self.covar_floor_factor = covar_floor_factor
         self.dirichlet_alpha = dirichlet_alpha
         self.adaptive_min_covar = max(min_hmm_covar, covar_floor_factor)
@@ -70,35 +69,28 @@ class HMMRegressionSurrogate:
         
         self.hmm_model.transmat_ = smoothed_transmat
 
-    def _apply_covariance_flooring(self, observation_data_concatenated): # Renamed for clarity
+    def _apply_covariance_flooring(self, observation_data_concatenated): 
         """
         Apply adaptive covariance flooring based on observation data characteristics.
         Sets self.adaptive_covar_floor (shape (n_dim,))
         and updates self.hmm_model.min_covar (scalar) for hmmlearn.
         """
-        if observation_data_concatenated.shape[0] < 2: # Need at least 2 observations for variance
+        if observation_data_concatenated.shape[0] < 2:
             print("Warning: Not enough data to compute observation variance for adaptive flooring. Using default min_covar.")
-            # self.adaptive_covar_floor might not be set or be based on single obs if not handled
-            # Ensure self.hmm_model.min_covar has a sane value from __init__
-            self.adaptive_covar_floor = np.full(observation_data_concatenated.shape[1], self.adaptive_min_covar) # Fallback
-            # self.hmm_model.min_covar remains self.adaptive_min_covar
+            
+            self.adaptive_covar_floor = np.full(observation_data_concatenated.shape[1], self.adaptive_min_covar)
+            
             return self.adaptive_covar_floor
 
-        obs_var = np.var(observation_data_concatenated, axis=0) # Shape (n_dim,)
+        obs_var = np.var(observation_data_concatenated, axis=0)
         
-        # Ensure covar_floor_factor is a scalar or compatible array
-        # self.adaptive_min_covar is already a scalar from __init__
         
-        # adaptive_floor will be (n_dim,)
         self.adaptive_covar_floor = np.maximum(
             obs_var * self.covar_floor_factor,
-            np.full_like(obs_var, self.adaptive_min_covar) # Ensure this is also (n_dim,)
+            np.full_like(obs_var, self.adaptive_min_covar)
         )
         
-        # hmmlearn's min_covar is a scalar. We might use the mean of our adaptive floor.
-        # Or, we can apply our adaptive_covar_floor vector directly in _post_process_hmm_parameters
-        # For now, let's set a scalar min_covar for hmmlearn's internal use during fit,
-        # and then apply our potentially more nuanced adaptive_covar_floor vector post-fit.
+     
         scalar_min_covar_for_hmmlearn = max(np.mean(self.adaptive_covar_floor), self.adaptive_min_covar)
         self.hmm_model.min_covar = scalar_min_covar_for_hmmlearn
             
@@ -112,29 +104,23 @@ class HMMRegressionSurrogate:
             print("HMM not trained or covars not available for post-processing.")
             return
 
-        n_dim_obs = self.hmm_model.means_.shape[1] # Get observation dimensionality
+        n_dim_obs = self.hmm_model.means_.shape[1] 
 
         if self.covariance_type == 'diag':
-            # self.hmm_model.covars_ should be (n_states, n_dim_obs) after fit
-            current_covars = self.hmm_model.covars_.copy() # Work on a copy
+            current_covars = self.hmm_model.covars_.copy() 
 
             if current_covars.shape != (self.n_states, n_dim_obs):
                 print(f"ERROR: Initial covars_ shape {current_covars.shape} is unexpected for 'diag'. "
                       f"Expected ({self.n_states}, {n_dim_obs}). Aborting post-process.")
-                return # Avoid further errors
+                return 
 
-            # Determine the floor: either adaptive (vector) or scalar from hmm_model.min_covar
             if hasattr(self, 'adaptive_covar_floor') and self.adaptive_covar_floor.shape == (n_dim_obs,):
-                # Broadcast (n_dim_obs,) floor across n_states
                 cov_floor = self.adaptive_covar_floor 
             else:
-                # Use the scalar min_covar set for hmmlearn (or from init if adaptive failed)
                 cov_floor = self.hmm_model.min_covar 
             
-            # Apply floor: np.maximum will broadcast scalar or (D,) array to (N,D)
             processed_covars = np.maximum(current_covars, cov_floor)
 
-            # Final check of shape before assignment
             if processed_covars.shape == (self.n_states, n_dim_obs):
                 self.hmm_model.covars_ = processed_covars
                 print(f"Post-processed 'diag' covariances. Final shape: {self.hmm_model.covars_.shape}")
@@ -143,44 +129,33 @@ class HMMRegressionSurrogate:
                       f"Expected ({self.n_states}, {n_dim_obs}). Covariances not updated.")
 
         elif self.covariance_type == 'full':
-            # self.hmm_model.covars_ should be (n_states, n_dim_obs, n_dim_obs)
             for i in range(self.n_states):
-                # Determine regularization value (scalar)
                 if hasattr(self, 'adaptive_covar_floor') and self.adaptive_covar_floor.shape == (n_dim_obs,):
-                    # For full cov, might use mean of adaptive floor or a component if appropriate
                     reg_value = np.mean(self.adaptive_covar_floor) 
                 else:
                     reg_value = self.hmm_model.min_covar 
                 
-                # Add to diagonal for regularization (positive definiteness)
                 diag_indices = np.diag_indices(n_dim_obs)
                 self.hmm_model.covars_[i][diag_indices] = np.maximum(
                     self.hmm_model.covars_[i][diag_indices], reg_value
                 )
-                # Alternative: self.hmm_model.covars_[i] += reg_value * np.eye(n_dim_obs) 
-                # The np.maximum on diagonal is more direct if adaptive_covar_floor is per-dimension.
-                # If adding reg_value * eye, ensure reg_value isn't too large to dominate.
             print("Post-processed 'full' covariances (diagonal floored).")
             
-        # ... (spherical, tied - similar logic ensuring correct shapes and application of floor) ...
         elif self.covariance_type == 'spherical':
-            # self.hmm_model.covars_ should be (n_states,)
             if hasattr(self, 'adaptive_covar_floor'):
-                floor_val = np.mean(self.adaptive_covar_floor) # Use mean for spherical
+                floor_val = np.mean(self.adaptive_covar_floor) 
             else:
                 floor_val = self.hmm_model.min_covar
             self.hmm_model.covars_ = np.maximum(self.hmm_model.covars_, floor_val)
             print("Post-processed 'spherical' covariances.")
 
         elif self.covariance_type == 'tied':
-            # self.hmm_model.covars_ should be (n_dim_obs, n_dim_obs)
             if hasattr(self, 'adaptive_covar_floor') and self.adaptive_covar_floor.shape == (n_dim_obs,):
-                 # For tied full cov, might apply adaptive floor to its diagonal
                 diag_indices = np.diag_indices(n_dim_obs)
                 self.hmm_model.covars_[diag_indices] = np.maximum(
                     self.hmm_model.covars_[diag_indices], self.adaptive_covar_floor
                 )
-            else: # Scalar floor
+            else: 
                 diag_indices = np.diag_indices(n_dim_obs)
                 self.hmm_model.covars_[diag_indices] = np.maximum(
                     self.hmm_model.covars_[diag_indices], self.hmm_model.min_covar
@@ -188,44 +163,41 @@ class HMMRegressionSurrogate:
             print("Post-processed 'tied' covariances (diagonal floored).")
 
 
-        # Post-process start probabilities
         if hasattr(self.hmm_model, 'startprob_'):
-            min_start_prob = 1e-6 # Small floor to avoid zero probabilities
+            min_start_prob = 1e-6 
             self.hmm_model.startprob_ = np.maximum(self.hmm_model.startprob_, min_start_prob)
-            self.hmm_model.startprob_ /= np.sum(self.hmm_model.startprob_) # Re-normalize
+            self.hmm_model.startprob_ /= np.sum(self.hmm_model.startprob_)
 
     def fit_hmm(self, observation_sequences):
         """Train the HMM component with enhanced robustness features"""
-        # ... (initial checks for observation_sequences and lengths) ...
-        if not observation_sequences: # ...
+        if not observation_sequences: 
             return False
-        lengths = [seq.shape[0] for seq in observation_sequences if seq.shape[0] > 0] # ...
-        if not lengths: # ...
+        lengths = [seq.shape[0] for seq in observation_sequences if seq.shape[0] > 0] 
+        if not lengths: 
             return False
         concatenated_sequences = np.concatenate([seq for seq in observation_sequences if seq.shape[0] > 0])
 
-        # Call _apply_covariance_flooring BEFORE fit to set self.hmm_model.min_covar
         print("\n--- Applying HMM Robustness Enhancements (Pre-Fit) ---")
-        #self._apply_covariance_flooring(concatenated_sequences) 
+        self._apply_covariance_flooring(concatenated_sequences) 
         
         print(f"\nTraining HMM with {self.n_states} states (cov_type='{self.covariance_type}') on {len(lengths)} sequences.")
         print(f"Using min_covar for hmmlearn fit: {self.hmm_model.min_covar}")
         
         original_verbose_setting = self.hmm_model.verbose
-        self.hmm_model.verbose = True # Enable verbose for fit
+        self.hmm_model.verbose = True 
         try:
             self.hmm_model.fit(concatenated_sequences, lengths)
         finally:
-            self.hmm_model.verbose = original_verbose_setting # Restore
+            self.hmm_model.verbose = original_verbose_setting 
 
         # Post-fit processing
         print("\n--- Applying HMM Robustness Enhancements (Post-Fit) ---")
-        #self._apply_dirichlet_smoothing()    # Operates on self.hmm_model.transmat_
-        self._post_process_hmm_parameters()  # Operates on self.hmm_model.covars_ and startprob_
+        self._apply_dirichlet_smoothing()    
+        self._post_process_hmm_parameters()  
 
         self.is_hmm_trained = True
         print("\nHMM training complete with robustness enhancements.")
-        self.print_hmm_parameters() # Now prints the post-processed parameters
+        self.print_hmm_parameters() 
         self._define_feature_schema()
         return True
 
@@ -249,24 +221,9 @@ class HMMRegressionSurrogate:
                 print(f"Minimum diagonal covariance: {np.min(self.hmm_model.covars_):.6f}")
             print(f"Dirichlet smoothing alpha: {self.dirichlet_alpha}")
 
-    # def _define_feature_schema(self):
-    #     """Defines the names and order of features for consistency."""
-    #     d_obs = self.hmm_model.means_.shape[1] if self.is_hmm_trained and hasattr(self.hmm_model, 'means_') else 2 
 
-    #     self.feature_names = []
-    #     self.feature_names.extend([f'current_obs_{i}' for i in range(d_obs)])
-    #     self.feature_names.extend([f'state_post_{j}' for j in range(self.n_states)])
-    #     self.feature_names.extend([f'next_hmm_state_prob_{j}' for j in range(self.n_states)])
-    #     self.feature_names.append('decoded_current_state')
-    #     self.feature_names.append('norm_seq_position')
-    #     self.feature_names.append('current_obs_std')
-    #     self.feature_names.append('max_state_posterior_confidence')
         
-    #     if True:  # Add prev_obs and obs_change
-    #         self.feature_names.extend([f'prev_obs_{i}' for i in range(d_obs)])
-    #         self.feature_names.extend([f'obs_change_{i}' for i in range(d_obs)])
-            
-    #     print(f"Defined feature schema with {len(self.feature_names)} features.")
+       
 
     def _init_regression_models(self):
         if self.regression_method == 'random_forest':
@@ -281,9 +238,9 @@ class HMMRegressionSurrogate:
 
         elif self.regression_method == 'mlp':
             self.prob_regressor = MLPRegressor(
-                hidden_layer_sizes=(512,256, 64, 32), activation='relu', solver='adam',
+                hidden_layer_sizes=(128, 64), activation='relu', solver='adam',
                 alpha=0.01, random_state=self.random_state, max_iter=500, early_stopping=True, n_iter_no_change=10)
-            # No uncertainty intervals for MLP - removed warning message
+
             self.lower_quantile_regressor = None 
             self.upper_quantile_regressor = None
 
@@ -398,12 +355,11 @@ class HMMRegressionSurrogate:
     def _define_feature_schema(self):
         """Defines the names and order of features for consistency."""
         self.feature_names = []
-        # Only HMM state and dynamics features (no observation-based features)
         self.feature_names.extend([f'state_post_{j}' for j in range(self.n_states)])
         self.feature_names.extend([f'next_hmm_state_prob_{j}' for j in range(self.n_states)])
         self.feature_names.append('decoded_current_state')
         self.feature_names.append('max_state_posterior_confidence')
-        self.feature_names.append('norm_seq_position')  # Optional
+        self.feature_names.append('norm_seq_position')
         
         print(f"Defined HMM-only feature schema with {len(self.feature_names)} features.")
 
