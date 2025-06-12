@@ -3,7 +3,7 @@ from hmmlearn import hmm
 import joblib
 from tqdm.auto import tqdm
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.neural_network import MLPRegressor
+from sklearn.neural_network import MLPRegressor, MLPClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.preprocessing import StandardScaler
@@ -48,8 +48,19 @@ class HMMRegressionSurrogate:
             random_state=random_state, verbose=True, min_covar=self.adaptive_min_covar)
 
         self._init_regression_models()
+        
+        self.final_sentiment_classifier = MLPClassifier(
+            random_state=self.random_state + 200, 
+            early_stopping=True, 
+            max_iter=300,
+            hidden_layer_sizes=(64, 32)
+        )
+        self.final_pred_feature_scaler = StandardScaler()
+        self.use_final_pred_scaling = True
+        
         self.is_hmm_trained = False
         self.is_regression_trained = False
+        self.is_final_classifier_trained = False
         self.feature_names = []
 
     
@@ -573,6 +584,131 @@ class HMMRegressionSurrogate:
       
         results['state_names'] = state_names
         return results
+    
+    def _get_final_true_labels(self, observation_sequences):
+        """Extract binary final sentiment labels from observation sequences."""
+        final_labels = []
+        for seq in observation_sequences:
+            if seq.shape[0] > 0:
+               
+                final_prob_positive = seq[-1, self.target_sentiment_idx]
+                
+                final_labels.append(1 if final_prob_positive >= 0.5 else 0)
+            else:
+                final_labels.append(None) 
+        return final_labels
+
+    def _extract_final_prediction_features(self, observation_sequences, k_prefix=5):
+        """Extract HMM features from sequence prefixes for final sentiment prediction."""
+        if not self.is_hmm_trained:
+            raise ValueError("HMM must be trained first.")
+        
+        all_prefix_features = []
+        
+        for seq in tqdm(observation_sequences, desc="Extracting final prediction features from prefixes"):
+            if seq.shape[0] >= k_prefix:
+                prefix_obs = seq[:k_prefix]
+                try:
+                    # Get HMM state posterior after k_prefix steps
+                    # predict_proba returns P(S_t | o_1...o_t) for each t in the prefix
+                    # We want the one for the last step of the prefix (k_prefix-1 index)
+                    hmm_state_posteriors_at_k = self.hmm_model.predict_proba(prefix_obs)[-1]  # Shape: (n_states,)
+                    
+                    # We could add more HMM-derived features here if desired
+                    #decoded_state_at_k = self.hmm_model.predict(prefix_obs)[-1]
+                    #feature_vector = np.concatenate([hmm_state_posteriors_at_k, [decoded_state_at_k]])
+                    feature_vector = hmm_state_posteriors_at_k
+                    
+                  
+                    all_prefix_features.append(feature_vector)
+                except Exception as e:
+                    print(f"Warning: Could not process prefix for a sequence: {e}")
+                    all_prefix_features.append(None)  # Placeholder for sequences that fail
+            else:
+                all_prefix_features.append(None)  # Placeholder for sequences shorter than k_prefix
+                
+        return all_prefix_features  
+
+    def train_final_sentiment_classifier(self, all_observation_sequences, k_prefix=5):
+        """Train a classifier to predict final sentiment from sequence prefixes."""
+        print(f"\nTraining final sentiment classifier based on {k_prefix}-token prefixes...")
+        
+    
+        raw_features_list = self._extract_final_prediction_features(all_observation_sequences, k_prefix=k_prefix)
+        
+  
+        true_final_labels_list = self._get_final_true_labels(all_observation_sequences)
+        
+        # 3. Filter out None entries (from short sequences or processing errors)
+      
+        X_final_clf = []
+        y_final_clf = []
+        for features, label in zip(raw_features_list, true_final_labels_list):
+            if features is not None and label is not None:
+                X_final_clf.append(features)
+                y_final_clf.append(label)
+                
+        if not X_final_clf:
+            print("Error: No valid features extracted for training the final sentiment classifier.")
+            return False
+            
+        X_final_clf = np.array(X_final_clf)
+        y_final_clf = np.array(y_final_clf)
+        
+        print(f"Extracted {X_final_clf.shape[0]} feature vectors for final classification.")
+       
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_final_clf, y_final_clf, 
+            test_size=0.2, 
+            random_state=self.random_state + 300, 
+            stratify=y_final_clf if np.unique(y_final_clf).size > 1 else None
+        )
+
+   
+        if self.use_final_pred_scaling:
+            X_train_processed = self.final_pred_feature_scaler.fit_transform(X_train)
+            X_val_processed = self.final_pred_feature_scaler.transform(X_val)
+        else:
+            X_train_processed = X_train 
+            X_val_processed = X_val
+
+     
+        print("Fitting final sentiment classifier...")
+        self.final_sentiment_classifier.fit(X_train_processed, y_train)
+        self.is_final_classifier_trained = True
+        
+   
+        if X_val_processed.shape[0] > 0:
+            val_accuracy = self.final_sentiment_classifier.score(X_val_processed, y_val)
+            print(f"Validation Accuracy of final sentiment classifier: {val_accuracy:.4f}")
+        
+        print("Final sentiment classifier training complete.")
+        return True
+
+    def predict_final_sentiment_from_prefix(self, obs_prefix_k_steps):
+        """Predict final sentiment from a sequence prefix."""
+        if not self.is_hmm_trained:
+            raise ValueError("HMM component is not trained.")
+        if not self.is_final_classifier_trained:
+            raise ValueError("Final sentiment classifier is not trained.")
+            
+        try:
+            hmm_state_posteriors_at_k = self.hmm_model.predict_proba(obs_prefix_k_steps)[-1]
+            feature_vector = hmm_state_posteriors_at_k.reshape(1, -1)  # Reshape for single sample
+        except Exception as e:
+            print(f"Error processing prefix for final prediction: {e}")
+            return None, None
+            
+        if self.use_final_pred_scaling and hasattr(self.final_pred_feature_scaler, 'mean_'):
+            feature_vector_processed = self.final_pred_feature_scaler.transform(feature_vector)
+        else:
+            feature_vector_processed = feature_vector
+
+        final_prediction_label = self.final_sentiment_classifier.predict(feature_vector_processed)
+        final_prediction_proba = self.final_sentiment_classifier.predict_proba(feature_vector_processed)
+        
+        return final_prediction_label[0], final_prediction_proba[0]
+    
 
     def save_pipeline(self, path_prefix="models/hmm_regression_pipeline"):
         model_dir = os.path.dirname(path_prefix)
@@ -586,16 +722,20 @@ class HMMRegressionSurrogate:
             'prob_regressors_ensemble': None, 
             'feature_scaler': self.feature_scaler if self.use_feature_scaling and hasattr(self.feature_scaler, 'mean_') else None,
             'pca_transformer': self.pca_transformer if self.use_pca_features and hasattr(self.pca_transformer, 'mean_') else None,
+            'final_sentiment_classifier': self.final_sentiment_classifier if self.is_final_classifier_trained else None,
+            'final_pred_feature_scaler': self.final_pred_feature_scaler if self.use_final_pred_scaling and hasattr(self.final_pred_feature_scaler, 'mean_') else None,
             'config': {
                 'n_states': self.n_states,
                 'covariance_type': self.covariance_type,
                 'regression_method': self.regression_method,
                 'is_hmm_trained': self.is_hmm_trained,
                 'is_regression_trained': self.is_regression_trained,
+                'is_final_classifier_trained': self.is_final_classifier_trained,
                 'feature_names': self.feature_names,
                 'use_feature_scaling': self.use_feature_scaling,
                 'use_pca_features': self.use_pca_features,
                 'n_pca_components': self.n_pca_components,
+                'use_final_pred_scaling': self.use_final_pred_scaling,
                 'target_sentiment_idx': self.target_sentiment_idx
             }
         }
@@ -634,13 +774,20 @@ class HMMRegressionSurrogate:
             instance.upper_quantile_regressor = pipeline_data.get('upper_quantile_regressor')
             instance.is_regression_trained = True
             
+        if config.get('is_final_classifier_trained', False):
+            instance.final_sentiment_classifier = pipeline_data['final_sentiment_classifier']
+            instance.is_final_classifier_trained = True
+            
         if pipeline_data.get('feature_scaler'):
             instance.feature_scaler = pipeline_data['feature_scaler']
         if pipeline_data.get('pca_transformer'):
             instance.pca_transformer = pipeline_data['pca_transformer']
+        if pipeline_data.get('final_pred_feature_scaler'):
+            instance.final_pred_feature_scaler = pipeline_data['final_pred_feature_scaler']
             
         instance.feature_names = config.get('feature_names', [])
-        instance.target_sentiment_idx = config.get('target_sentiment_idx', TARGET_SENTIMENT) 
+        instance.target_sentiment_idx = config.get('target_sentiment_idx', TARGET_SENTIMENT)
+        instance.use_final_pred_scaling = config.get('use_final_pred_scaling', True)
         
         print(f"Full HMM Regression Pipeline loaded from {path_prefix}.pkl")
         return instance
@@ -721,3 +868,5 @@ class HMMRegressionSurrogate:
                 else: print(f"Warning: Upper quantile regressor feature name/importance length mismatch.")
 
         return importance_results
+    
+  
