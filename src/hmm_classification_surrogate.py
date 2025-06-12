@@ -18,7 +18,7 @@ warnings.filterwarnings('ignore', category=RuntimeWarning)
 from .config import NUM_HMM_STATES, HMM_N_ITER, HMM_TOL, HMM_COV_TYPE, \
                        TARGET_SENTIMENT, HMM_MODEL_PATH, PROB_THRESHOLDS
 
-class HMMRegressionSurrogate:
+class HMMClassificationSurrogate:
     def __init__(self, n_states=NUM_HMM_STATES, n_iter=HMM_N_ITER, tol=HMM_TOL,
                  covariance_type=HMM_COV_TYPE, random_state=2,
                  regression_method='random_forest',
