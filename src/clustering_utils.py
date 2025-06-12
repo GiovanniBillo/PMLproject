@@ -3,7 +3,7 @@
 import os
 import pickle
 
-from src.config import (COLOR_LOG_FILE_PATH)
+from .config import (COLOR_LOG_FILE_PATH)
 # Global in-memory log to collect entries across calls
 color_transitions_log = []
 

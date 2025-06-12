@@ -15,7 +15,7 @@ def load_imdb_data(split ='train', num_samples=None,shuffle=True):
     if num_samples is not None:
         dataset = dataset.select(range(min(num_samples, len(dataset))))
     if shuffle:
-        dataset = dataset.shuffle(seed = 123)
+        dataset = dataset.shuffle(seed = 3)
 
     return dataset
 
